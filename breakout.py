@@ -8,7 +8,7 @@ from keras.optimizers import Adam
 import keras.backend as K
 
 from rl.agents.dqn import DQNAgent
-from rl.policy import LinearAnnealedPolicy, BoltzmannQPolicy, EpsGreedyQPolicy
+from rl.policy import LinearAnnealedPolicy, BoltzmannQPolicy, EpsGreedyQPolicy, MaxBoltzmannQPolicy
 from rl.memory import SequentialMemory
 from rl.core import Processor
 from rl.callbacks import FileLogger, ModelIntervalCheckpoint
@@ -16,7 +16,7 @@ from rl.callbacks import FileLogger, ModelIntervalCheckpoint
 
 INPUT_SHAPE = (84, 84)
 WINDOW_LENGTH = 4
-DROP = 0.1
+DROP = 0.05
 
 class AtariProcessor(Processor):
     def process_observation(self, observation):
@@ -55,14 +55,20 @@ model = Sequential()
 # (width, height, channels)
 model.add(Permute((2, 3, 1), input_shape=input_shape))
 
-model.add(Convolution2D(32, 8, strides=4, padding="same", activation="elu"))
+
+model.add(Convolution2D(32, 3, strides=2, padding="same", activation="elu"))
 model.add(Dropout(DROP))
-model.add(Convolution2D(64, 6, strides=3, padding="same", activation="elu"))
+model.add(Convolution2D(32, 3, strides=2, padding="same", activation="elu"))
+model.add(Dropout(DROP))
+model.add(Convolution2D(64, 3, strides=2, padding="same", activation="elu"))
+model.add(Dropout(DROP))
+model.add(Convolution2D(64, 3, strides=2, padding="same", activation="elu"))
 model.add(Dropout(DROP))
 model.add(Convolution2D(64, 3, strides=2, padding="same", activation="elu"))
 model.add(Dropout(DROP))
 model.add(Flatten())
-model.add(Dense(512, activation="elu"))
+model.add(Dense(128, activation="elu"))
+model.add(Dropout(DROP))
 model.add(Dense(nb_actions, activation="linear"))
 print(model.summary())
 
@@ -76,17 +82,17 @@ processor = AtariProcessor()
 # the agent initially explores the environment (high eps) and then gradually sticks to what it knows
 # (low eps). We also set a dedicated eps value that is used during testing. Note that we set it to 0.05
 # so that the agent still performs some random actions. This ensures that the agent cannot get stuck.
-# policy = LinearAnnealedPolicy(EpsGreedyQPolicy(), attr='eps', value_max=1, value_min=.1, value_test=.05, nb_steps=1000000)
+policy = LinearAnnealedPolicy(MaxBoltzmannQPolicy(), attr='eps', value_max=1., value_min=.05, value_test=.001, nb_steps=1000000)
 
 # The trade-off between exploration and exploitation is difficult and an on-going research topic.
 # If you want, you can experiment with the parameters or use a different policy. Another popular one
 # is Boltzmann-style exploration:
 # policy = BoltzmannQPolicy(tau=1.)
 # Feel free to give it a try!
-policy = LinearAnnealedPolicy(BoltzmannQPolicy(), attr='tau', value_max=10., value_min=.1, value_test=.05, nb_steps=1000000)
+# policy = LinearAnnealedPolicy(BoltzmannQPolicy(), attr='tau', value_max=10., value_min=.1, value_test=.05, nb_steps=1000000)
 
 dqn = DQNAgent(model=model, nb_actions=nb_actions, policy=policy, memory=memory,
-               processor=processor, nb_steps_warmup=50000, gamma=.99, target_model_update=10000,
+               processor=processor, nb_steps_warmup=10000, gamma=.99, target_model_update=30000,
                train_interval=4, delta_clip=1.)
 dqn.compile(Adam(lr=.00025), metrics=['mae'])
 
@@ -98,7 +104,7 @@ if mode == 'train':
     log_filename = 'dqn_{}_log.json'.format(env_name)
     callbacks = [ModelIntervalCheckpoint(checkpoint_weights_filename, interval=250000)]
     callbacks += [FileLogger(log_filename, interval=100)]
-    dqn.fit(env, callbacks=callbacks, nb_steps=5000000, log_interval=50000)
+    dqn.fit(env, callbacks=callbacks, nb_steps=5000000, log_interval=10000)
 
     # After training is done, we save the final weights one more time.
     dqn.save_weights(weights_filename, overwrite=True)
